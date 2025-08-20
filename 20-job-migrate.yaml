@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redash-migrate
+  namespace: redash
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: redash/redash:25.8.0
+          # Usa el entrypoint propio de la imagen de Redash
+          command: ["/app/bin/docker-entrypoint"]
+          args: ["manage", "db", "upgrade"]
+          envFrom:
+            - configMapRef:
+                name: redash-config
+            - secretRef:
+                name: redash-dev-core-secrets
+            - secretRef:
+                name: redash-dev-resend-smtp
+          env:
+            - name: REDASH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redash-dev-postgres-direct
+                  key: REDASH_DATABASE_URL
+            - name: REDASH_REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: redash-config
+                  key: REDASH_REDIS_URL
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits: { cpu: "600m", memory: "512Mi" }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }

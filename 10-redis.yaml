@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redash-redis-conf
+  namespace: redash
+data:
+  redis.conf: |
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+    save ""
+    appendonly no
+    dir /data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redash-redis
+  namespace: redash
+spec:
+  type: ClusterIP
+  selector:
+    app: redash-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redash-redis
+  namespace: redash
+  labels: { app: redash-redis }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redash-redis }
+  template:
+    metadata:
+      labels: { app: redash-redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          args: ["redis-server", "/etc/redis/redis.conf"]
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-conf
+              mountPath: /etc/redis
+              readOnly: true
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+      volumes:
+        - name: redis-conf
+          configMap:
+            name: redash-redis-conf
+            items:
+              - key: redis.conf
+                path: redis.conf
+        - name: redis-data
+          emptyDir: {}
