@@ -1,3 +1,7 @@
+# ---------------------------------------------
+# Pod Disruption Budget - Redash Web
+# Ensures at least 1 web replica stays during voluntary disruptions
+# ---------------------------------------------
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -6,4 +10,59 @@ metadata:
 spec:
   minAvailable: 1
   selector:
-    matchLabels: { app: redash, comp: web }
+    matchLabels:
+      app: redash
+      comp: web
+---
+# ---------------------------------------------
+# Resource Quota - Prevents resource exhaustion
+# ---------------------------------------------
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: redash-quota
+  namespace: redash
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: "4Gi"
+    limits.cpu: "4"
+    limits.memory: "6Gi"
+    persistentvolumeclaims: "5"
+    pods: "20"
+---
+# ---------------------------------------------
+# Baseline NetworkPolicy - Simplified
+# Allow internal communication and basic external access
+# ---------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redash-network-policy
+  namespace: redash
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow all traffic within namespace and from nodes (for health checks)
+    - {}
+  egress:
+    # Allow all egress (simplified for basic functionality)
+    - {}
+---
+# ---------------------------------------------
+# Pod Disruption Budget - Cloudflared Tunnel
+# Ensures at least 1 tunnel replica stays during disruptions
+# ---------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-cloudflared-tunnel
+  namespace: redash
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared-tunnel

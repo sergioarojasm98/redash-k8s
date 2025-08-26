@@ -5,11 +5,24 @@ metadata:
   namespace: redash
 data:
   redis.conf: |
-    maxmemory 256mb
+    # Memory configuration - optimized for 7.5GB cluster with multiple services
+    maxmemory 768mb
     maxmemory-policy allkeys-lru
+    
+    # Disable persistence for pure cache usage
     save ""
     appendonly no
     dir /data
+    
+    # Performance optimizations
+    tcp-keepalive 60
+    timeout 300
+    
+    # Connection limits
+    maxclients 1000
+    
+    # Logging
+    loglevel notice
 ---
 apiVersion: v1
 kind: Service
@@ -52,8 +65,12 @@ spec:
             - name: redis-data
               mountPath: /data
           resources:
-            requests: { cpu: "50m", memory: "128Mi" }
-            limits: { cpu: "200m", memory: "256Mi" }
+            requests: 
+              cpu: "120m"
+              memory: "384Mi"
+            limits: 
+              cpu: "500m" 
+              memory: "768Mi"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

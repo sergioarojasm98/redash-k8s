@@ -15,4 +15,4 @@ data:
   REDASH_DATABASE_POOL_SIZE: "1"
   REDASH_DATABASE_MAX_OVERFLOW: "0"
 
-  REDASH_HOST: "https://redash-dev.redsign98.net"
+  REDASH_HOST: "https://redash.redsign98.net"

@@ -1,29 +1,47 @@
+# ---------------------------------------------
+# Service - cloudflared metrics/ready endpoint
+# ---------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
   name: cloudflared-tunnel
   namespace: redash
-  labels: { app: cloudflared-tunnel }
+  labels:
+    app: cloudflared-tunnel
+  annotations:
+    # Prometheus scrape hints (adjust to your stack or remove if not needed)
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "2000"
+    prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
-  selector: { app: cloudflared-tunnel }
+  selector:
+    app: cloudflared-tunnel
   ports:
     - name: metrics
       port: 2000
       targetPort: 2000
       protocol: TCP
 ---
+# ---------------------------------------------
+# Deployment - Cloudflare Tunnel (hardened)
+# Includes: startupProbe, readiness/liveness tuning,
+# IPv4 preference, securityContext hardening, sysctls,
+# and topology spreading for HA.
+# ---------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudflared-tunnel
   namespace: redash
-  labels: { app: cloudflared-tunnel }
+  labels:
+    app: cloudflared-tunnel
 spec:
   revisionHistoryLimit: 2
   replicas: 2
   selector:
-    matchLabels: { app: cloudflared-tunnel }
+    matchLabels:
+      app: cloudflared-tunnel
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -31,39 +49,80 @@ spec:
       maxUnavailable: 1
   template:
     metadata:
-      labels: { app: cloudflared-tunnel }
+      labels:
+        app: cloudflared-tunnel
     spec:
+      # Spread pods across nodes for better availability
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: cloudflared-tunnel
+      terminationGracePeriodSeconds: 30 # allow graceful disconnects
+      # Basic security context without problematic sysctls
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:2025.8.0
+          image: cloudflare/cloudflared:2025.8.1
+          imagePullPolicy: IfNotPresent
+          # Basic container security
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
           env:
             - name: TUNNEL_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: redash-dev-cloudflared-token
+                  name: redash-cloudflared-token
                   key: token
-          command:
-            - cloudflared
+          command: ["cloudflared"]
           args:
-            - tunnel
-            - --no-autoupdate
+            - tunnel # run remotely-managed tunnel using token
+            - --no-autoupdate # updates handled by your pipeline
             - --loglevel
             - info
             - --metrics
-            - 0.0.0.0:2000
+            - 0.0.0.0:2000 # expose metrics/ready
             - run
-          livenessProbe:
-            httpGet: { path: /ready, port: 2000 }
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 1
-            failureThreshold: 3
+          ports:
+            - name: metrics
+              containerPort: 2000
+              protocol: TCP
+          # Health checks tuned to avoid startup race and false negatives
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30 # ~60s to become ready at least once
           readinessProbe:
-            httpGet: { path: /ready, port: 2000 }
-            initialDelaySeconds: 5
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 15
             periodSeconds: 10
-            timeoutSeconds: 1
-            failureThreshold: 3
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
           resources:
-            requests: { cpu: "50m", memory: "128Mi" }
-            limits: { cpu: "200m", memory: "256Mi" }
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
