@@ -1,6 +1,22 @@
-# ---------------------------------------------
-# Service - cloudflared metrics/ready endpoint
-# ---------------------------------------------
+# =============================================================================
+# CLOUDFLARED TUNNEL - Zero-Trust External Access
+# =============================================================================
+# Cloudflare Tunnel provides secure external access without exposing ports.
+# Traffic flow: Internet → Cloudflare Edge → Tunnel → ClusterIP Service
+#
+# Benefits:
+# - No LoadBalancer or NodePort needed (cost savings on Spot clusters)
+# - DDoS protection and WAF included
+# - Zero-trust security model
+# - Works behind NAT/firewalls
+#
+# Configuration is managed in Cloudflare dashboard (tunnel routes).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Service: cloudflared-tunnel
+# Exposes metrics endpoint for monitoring (optional)
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -9,7 +25,7 @@ metadata:
   labels:
     app: cloudflared-tunnel
   annotations:
-    # Prometheus scrape hints (adjust to your stack or remove if not needed)
+    # Prometheus scrape configuration (if using Prometheus)
     prometheus.io/scrape: "true"
     prometheus.io/port: "2000"
     prometheus.io/path: "/metrics"
@@ -22,13 +38,12 @@ spec:
       port: 2000
       targetPort: 2000
       protocol: TCP
+
 ---
-# ---------------------------------------------
-# Deployment - Cloudflare Tunnel (hardened)
-# Includes: startupProbe, readiness/liveness tuning,
-# IPv4 preference, securityContext hardening, sysctls,
-# and topology spreading for HA.
-# ---------------------------------------------
+# -----------------------------------------------------------------------------
+# Deployment: cloudflared-tunnel
+# Two replicas for high availability during node maintenance
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,14 +60,14 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 0
+      maxSurge: 1
       maxUnavailable: 1
   template:
     metadata:
       labels:
         app: cloudflared-tunnel
     spec:
-      # Spread pods across nodes for better availability
+      # Spread pods across nodes for availability
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -60,17 +75,15 @@ spec:
           labelSelector:
             matchLabels:
               app: cloudflared-tunnel
-      terminationGracePeriodSeconds: 30 # allow graceful disconnects
-      # Basic security context without problematic sysctls
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:2025.8.1
+          image: cloudflare/cloudflared:2025.4.2
           imagePullPolicy: IfNotPresent
-          # Basic container security
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -84,25 +97,25 @@ spec:
                   key: token
           command: ["cloudflared"]
           args:
-            - tunnel # run remotely-managed tunnel using token
-            - --no-autoupdate # updates handled by your pipeline
+            - tunnel
+            - --no-autoupdate
             - --loglevel
             - info
             - --metrics
-            - 0.0.0.0:2000 # expose metrics/ready
+            - 0.0.0.0:2000
             - run
           ports:
             - name: metrics
               containerPort: 2000
               protocol: TCP
-          # Health checks tuned to avoid startup race and false negatives
+          # Startup probe - allows up to 60s for initial connection
           startupProbe:
             httpGet:
               path: /ready
               port: 2000
             periodSeconds: 2
             timeoutSeconds: 2
-            failureThreshold: 30 # ~60s to become ready at least once
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /ready

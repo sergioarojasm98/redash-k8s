@@ -1,7 +1,18 @@
-# ---------------------------------------------
-# Pod Disruption Budget - Redash Web
-# Ensures at least 1 web replica stays during voluntary disruptions
-# ---------------------------------------------
+# =============================================================================
+# GUARDRAILS - Security and Availability Policies
+# =============================================================================
+# This file contains protective measures for the Redash namespace:
+# - PodDisruptionBudgets: Ensure availability during node maintenance
+# - ResourceQuota: Prevent resource exhaustion in the namespace
+# - NetworkPolicy: Control traffic flow (currently permissive)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PodDisruptionBudget: redash-web
+# Ensures at least 1 web replica stays available during voluntary disruptions
+# (node drains, cluster upgrades, etc.)
+# Note: With replicas=1, this mainly prevents simultaneous eviction attempts
+# -----------------------------------------------------------------------------
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -13,10 +24,17 @@ spec:
     matchLabels:
       app: redash
       comp: web
+
 ---
-# ---------------------------------------------
-# Resource Quota - Prevents resource exhaustion
-# ---------------------------------------------
+# -----------------------------------------------------------------------------
+# ResourceQuota: redash-quota
+# Prevents runaway resource consumption in the namespace
+# Tuned for Rackspace Spot cluster (4 vCPU, 7.5GB RAM total)
+#
+# NOTE: During rollouts, quota may block new pod creation if old pods
+# still exist. Use "kubectl delete pod" to force restart instead of
+# "kubectl rollout restart" when hitting quota limits.
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -24,17 +42,23 @@ metadata:
   namespace: redash
 spec:
   hard:
+    # CPU - matches cluster capacity (4 vCPU)
     requests.cpu: "2"
-    requests.memory: "4Gi"
     limits.cpu: "4"
+    # Memory - within cluster capacity (7.5GB)
+    requests.memory: "4Gi"
     limits.memory: "6Gi"
+    # Storage and pod limits
     persistentvolumeclaims: "5"
     pods: "20"
+
 ---
-# ---------------------------------------------
-# Baseline NetworkPolicy - Simplified
-# Allow internal communication and basic external access
-# ---------------------------------------------
+# -----------------------------------------------------------------------------
+# NetworkPolicy: redash-network-policy
+# Controls ingress/egress traffic for pods in the namespace
+# Currently permissive - allows all internal and external traffic
+# Tighten for production environments
+# -----------------------------------------------------------------------------
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -46,16 +70,18 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Allow all traffic within namespace and from nodes (for health checks)
+    # Allow all ingress (from tunnel, between pods, health checks)
     - {}
   egress:
-    # Allow all egress (simplified for basic functionality)
+    # Allow all egress (to Supabase, external data sources, DNS)
     - {}
+
 ---
-# ---------------------------------------------
-# Pod Disruption Budget - Cloudflared Tunnel
+# -----------------------------------------------------------------------------
+# PodDisruptionBudget: cloudflared-tunnel
 # Ensures at least 1 tunnel replica stays during disruptions
-# ---------------------------------------------
+# Critical for maintaining external access during node maintenance
+# -----------------------------------------------------------------------------
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

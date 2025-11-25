@@ -1,17 +1,43 @@
+# =============================================================================
+# JOB: redash-migrate (ONE-TIME DATABASE MIGRATION)
+# =============================================================================
+# This Job runs Alembic database migrations to create/update the Redash schema.
+#
+# WHEN TO USE:
+# - First deployment: Creates all tables in PostgreSQL (Supabase)
+# - After Redash version upgrade: Applies schema changes
+#
+# IMPORTANT NOTES:
+# - This is a ONE-TIME job, not a recurring task
+# - Job stays in "Completed" state after running (this is normal)
+# - If upgrading Redash, delete the old job first: 
+#     kubectl delete job redash-migrate -n redash
+#   Then re-apply this manifest to run migrations again
+#
+# RESOURCE USAGE:
+# - Only consumes resources while running (~1-2 minutes)
+# - After completion, only the Job metadata remains (no pods running)
+# - Can be safely deleted after successful migration
+# =============================================================================
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: redash-migrate
   namespace: redash
+  labels:
+    app: redash
+    comp: migrate
 spec:
+  # Don't retry on failure - manual intervention needed
   backoffLimit: 0
+  # Auto-cleanup completed job after 1 hour (optional)
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: Never
       containers:
         - name: migrate
           image: redash/redash:25.8.0
-          # Usa el entrypoint propio de la imagen de Redash
           command: ["/app/bin/docker-entrypoint"]
           args: ["manage", "db", "upgrade"]
           envFrom:
@@ -33,12 +59,17 @@ spec:
                   name: redash-config
                   key: REDASH_REDIS_URL
           resources:
-            requests: { cpu: "150m", memory: "320Mi" }
-            limits: { cpu: "600m", memory: "640Mi" }
+            requests:
+              cpu: "150m"
+              memory: "320Mi"
+            limits:
+              cpu: "600m"
+              memory: "640Mi"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
             runAsGroup: 1000
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities:
+              drop: ["ALL"]

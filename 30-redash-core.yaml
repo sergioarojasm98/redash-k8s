@@ -1,28 +1,59 @@
+# =============================================================================
+# REDASH CORE SERVICES
+# =============================================================================
+# Main Redash application components:
+# - Web Server: Handles HTTP requests, serves UI and API
+# - Worker: Executes queries asynchronously via Celery
+# - Scheduler: Triggers scheduled queries and maintenance tasks
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Service: redash-web
+# Exposes the web server internally for cloudflared tunnel access
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
   name: redash-web
   namespace: redash
+  labels:
+    app: redash
+    comp: web
 spec:
   type: ClusterIP
-  selector: { app: redash, comp: web }
+  selector:
+    app: redash
+    comp: web
   ports:
     - name: http
       port: 5000
       targetPort: 5000
+
 ---
+# -----------------------------------------------------------------------------
+# Deployment: redash-web
+# Gunicorn server handling all HTTP traffic (UI + API)
+# Resources sized for single-user with multiple concurrent tabs
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redash-web
   namespace: redash
-  labels: { app: redash, comp: web }
+  labels:
+    app: redash
+    comp: web
 spec:
   replicas: 1
-  selector: { matchLabels: { app: redash, comp: web } }
+  selector:
+    matchLabels:
+      app: redash
+      comp: web
   template:
     metadata:
-      labels: { app: redash, comp: web }
+      labels:
+        app: redash
+        comp: web
     spec:
       volumes:
         - name: tmp
@@ -46,14 +77,19 @@ spec:
                 secretKeyRef:
                   name: redash-database-secrets
                   key: REDASH_DATABASE_URL
+          # Health checks for Kubernetes to detect unhealthy pods
           readinessProbe:
-            httpGet: { path: /ping, port: 5000 }
+            httpGet:
+              path: /ping
+              port: 5000
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 6
           livenessProbe:
-            httpGet: { path: /ping, port: 5000 }
+            httpGet:
+              path: /ping
+              port: 5000
             initialDelaySeconds: 20
             periodSeconds: 20
             timeoutSeconds: 2
@@ -61,29 +97,48 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+          # Resources tuned for Rackspace Spot cluster
           resources:
-            requests: { cpu: "350m", memory: "640Mi" }
-            limits: { cpu: "1100m", memory: "1280Mi" }
+            requests:
+              cpu: "500m"
+              memory: "896Mi"
+            limits:
+              cpu: "1500m"
+              memory: "1536Mi"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
             runAsGroup: 1000
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities:
+              drop: ["ALL"]
+
 ---
+# -----------------------------------------------------------------------------
+# Deployment: redash-worker
+# Celery worker that executes database queries asynchronously
+# Processes jobs from Redis queue, returns results to PostgreSQL
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redash-worker
   namespace: redash
-  labels: { app: redash, comp: worker }
+  labels:
+    app: redash
+    comp: worker
 spec:
   replicas: 1
-  selector: { matchLabels: { app: redash, comp: worker } }
+  selector:
+    matchLabels:
+      app: redash
+      comp: worker
   template:
     metadata:
-      labels: { app: redash, comp: worker }
+      labels:
+        app: redash
+        comp: worker
     spec:
       volumes:
         - name: tmp
@@ -109,28 +164,48 @@ spec:
             - name: tmp
               mountPath: /tmp
           resources:
-            requests: { cpu: "250m", memory: "448Mi" }
-            limits: { cpu: "900m", memory: "896Mi" }
+            requests:
+              cpu: "250m"
+              memory: "448Mi"
+            limits:
+              cpu: "900m"
+              memory: "896Mi"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
             runAsGroup: 1000
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities:
+              drop: ["ALL"]
+
 ---
+# -----------------------------------------------------------------------------
+# Deployment: redash-scheduler
+# Celery beat scheduler for periodic tasks:
+# - Triggers scheduled/refresh queries
+# - Cleanup old query results
+# - Health checks and maintenance
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redash-scheduler
   namespace: redash
-  labels: { app: redash, comp: scheduler }
+  labels:
+    app: redash
+    comp: scheduler
 spec:
   replicas: 1
-  selector: { matchLabels: { app: redash, comp: scheduler } }
+  selector:
+    matchLabels:
+      app: redash
+      comp: scheduler
   template:
     metadata:
-      labels: { app: redash, comp: scheduler }
+      labels:
+        app: redash
+        comp: scheduler
     spec:
       volumes:
         - name: tmp
@@ -156,12 +231,17 @@ spec:
             - name: tmp
               mountPath: /tmp
           resources:
-            requests: { cpu: "80m", memory: "192Mi" }
-            limits: { cpu: "300m", memory: "384Mi" }
+            requests:
+              cpu: "80m"
+              memory: "192Mi"
+            limits:
+              cpu: "300m"
+              memory: "384Mi"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
             runAsGroup: 1000
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities:
+              drop: ["ALL"]

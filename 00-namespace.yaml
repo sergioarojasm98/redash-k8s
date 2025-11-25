@@ -1,4 +1,13 @@
+# =============================================================================
+# NAMESPACE: redash
+# =============================================================================
+# Isolated namespace for all Redash-related resources.
+# Apply this first before any other manifests.
+# =============================================================================
 apiVersion: v1
 kind: Namespace
 metadata:
   name: redash
+  labels:
+    app.kubernetes.io/name: redash
+    app.kubernetes.io/part-of: redash-stack
