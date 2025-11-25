@@ -10,9 +10,9 @@ data:
   # Redis en-cluster
   REDASH_REDIS_URL: "redis://redash-redis.redash.svc.cluster.local:6379/0"
 
-  # Minimiza conexiones al Postgres de Supabase
-  REDASH_WEB_WORKERS: "1"
-  REDASH_DATABASE_POOL_SIZE: "1"
-  REDASH_DATABASE_MAX_OVERFLOW: "0"
+  # Balance entre conexiones a Supabase y manejo de pestañas concurrentes
+  REDASH_WEB_WORKERS: "2"
+  REDASH_DATABASE_POOL_SIZE: "3"
+  REDASH_DATABASE_MAX_OVERFLOW: "2"
 
   REDASH_HOST: "https://redash.redsign98.net"
