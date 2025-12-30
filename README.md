@@ -32,12 +32,7 @@ Deploy [Redash](https://redash.io/) on a cost-effective Kubernetes cluster using
 │  │  └───────────────────┘                                  │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                 kube-system namespace                    │   │
-│  │  ┌─────────────┐                                        │   │
-│  │  │  Headlamp   │ ←── Cluster management UI              │   │
-│  │  └─────────────┘                                        │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -56,7 +51,6 @@ Deploy [Redash](https://redash.io/) on a cost-effective Kubernetes cluster using
 | **redash-scheduler** | Scheduled queries | 1 | 80m-300m CPU, 192Mi-384Mi RAM |
 | **redash-redis** | Cache + job queue | 1 | 120m-500m CPU, 384Mi-768Mi RAM |
 | **cloudflared** | Secure tunnel | 2 | 50m-200m CPU, 128Mi-256Mi RAM |
-| **headlamp** | K8s dashboard | 1 | 80m-300m CPU, 192Mi-384Mi RAM |
 
 **Total**: ~1.1 CPU requests, ~2.2Gi RAM requests
 
@@ -108,12 +102,6 @@ TUNNEL_TOKEN=eyJhIjoiNj...
 ### 3. Access
 
 - **Redash**: https://redash.redsign98.net
-- **Headlamp**: https://hl-redash.redsign98.net
-
-Generate Headlamp token:
-```bash
-./deploy.sh generate-token
-```
 
 ## File Structure
 
@@ -127,7 +115,6 @@ Generate Headlamp token:
 ├── 30-redash-core.yaml    # Web, Worker, Scheduler deployments
 ├── 40-cloudflared.yaml    # Cloudflare Tunnel
 ├── 50-guardrails.yaml     # PDBs, ResourceQuota, NetworkPolicy
-├── 60-headlamp.yaml       # Kubernetes dashboard
 ├── deploy.sh              # Deployment automation
 └── README.md
 ```
@@ -262,7 +249,6 @@ kubectl delete pod -l app=redash,comp=worker -n redash
 - **Dropped capabilities**: All Linux capabilities dropped
 - **NetworkPolicy**: Traffic control (currently permissive)
 - **ResourceQuota**: Prevents resource exhaustion
-- **Token auth**: Headlamp requires authentication token
 
 ## Cost Optimization
 

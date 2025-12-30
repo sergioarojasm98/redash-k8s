@@ -91,27 +91,6 @@ validate_env_vars() {
     print_success "All required environment variables are set"
 }
 
-# Function to setup Headlamp
-setup_headlamp() {
-    print_status "Setting up Headlamp with in-cluster authentication..."
-    
-    # Apply the Headlamp RBAC and deployment
-    kubectl apply -f 60-headlamp.yaml
-    
-    # Wait for deployment to be ready
-    if kubectl rollout status deployment/headlamp -n kube-system --timeout=300s; then
-        print_success "Headlamp deployment is ready"
-    else
-        print_warning "Headlamp deployment is still starting up"
-    fi
-    
-    print_success "Headlamp configured with in-cluster authentication"
-    print_warning "🔐 To access Headlamp UI, you'll need to generate a user token:"
-    echo ""
-    echo "  kubectl create token headlamp-admin --namespace kube-system --duration=8760h"
-    echo ""
-    print_status "Or use: $0 generate-token"
-}
 substitute_vars() {
     local file=$1
     print_status "Processing $file..."
@@ -195,13 +174,6 @@ check_deployment_status() {
             exit 1
         fi
     done
-    
-    # Check headlamp separately (different namespace)
-    if kubectl rollout status deployment/headlamp -n kube-system --timeout=300s; then
-        print_success "Headlamp deployment is ready"
-    else
-        print_warning "Headlamp deployment is still starting up"
-    fi
 }
 
 # Function to cleanup processed files
@@ -218,16 +190,13 @@ show_info() {
     echo ""
     print_status " Access your applications via Cloudflare Tunnel:"
     echo "    🎯 Redash: https://redash.redsign98.net"
-    echo "    📈 Headlamp: https://hl-redash.redsign98.net"
     echo ""
     print_status "Useful commands for monitoring:"
     echo "  # Check pod status:"
     echo "    kubectl get pods -n redash"
-    echo "    kubectl get pods -n kube-system | grep headlamp"
     echo ""
     echo "  # Check service status (all should be ClusterIP):"
     echo "    kubectl get svc -n redash"
-    echo "    kubectl get svc -n kube-system my-headlamp"
     echo ""
     echo "  # View logs:"
     echo "    kubectl logs -f deployment/redash-web -n redash"
@@ -237,12 +206,9 @@ show_info() {
     echo ""
     print_warning "⚠️  For local testing only (NOT for production):"
     echo "    kubectl port-forward svc/redash-web 5000:5000 -n redash"
-    echo "    kubectl port-forward svc/my-headlamp 8080:80 -n kube-system"
     echo "    Then visit: http://localhost:5000 (Redash)"
-    echo "    Then visit: http://localhost:8080 (Headlamp)"
     echo ""
     print_status "🎉 Your secure cluster setup:"
-    echo "  � Headlamp: Full cluster-admin access pre-configured"
     echo "  �️ Zero external exposure - tunnel only access"
     echo "  � Complete monitoring and analytics stack"
     echo ""
@@ -269,9 +235,6 @@ main() {
     
     # Apply all manifests
     apply_manifests
-    
-    # Setup Headlamp
-    setup_headlamp
     
     # Wait for migration to complete
     wait_for_migration
@@ -308,29 +271,14 @@ case "${1:-deploy}" in
         print_status "Showing logs for redash-$component..."
         kubectl logs -f deployment/redash-$component -n redash
         ;;
-    "generate-token")
-        print_status "Generating Headlamp admin token..."
-        if kubectl get serviceaccount headlamp-admin -n kube-system &>/dev/null; then
-            token=$(kubectl create token headlamp-admin --namespace kube-system --duration=8760h)
-            print_success "Headlamp admin token generated:"
-            echo ""
-            echo "HEADLAMP_TOKEN=\"$token\""
-            echo ""
-            print_status "Save this token securely"
-        else
-            print_error "headlamp-admin service account not found"
-            print_status "Deploy first with: $0 deploy"
-        fi
-        ;;
     "help"|"-h"|"--help")
         echo "Usage: $0 [command]"
         echo ""
         echo "Commands:"
-        echo "  deploy          Deploy Redash with Headlamp (default)"
+        echo "  deploy          Deploy Redash (default)"
         echo "  cleanup         Remove Redash deployment"
         echo "  status          Show deployment status"
         echo "  logs            Show logs for component (web|worker|scheduler)"
-        echo "  generate-token  Generate new Headlamp admin token"
         echo "  help            Show this help"
         echo ""
         echo "Examples:"
