@@ -45,6 +45,9 @@ metadata:
     comp: web
 spec:
   replicas: 1
+  # Recreate avoids quota exceeded errors on single-replica + tight ResourceQuota
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redash
@@ -130,6 +133,8 @@ metadata:
     comp: worker
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redash
@@ -197,6 +202,8 @@ metadata:
     comp: scheduler
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redash
