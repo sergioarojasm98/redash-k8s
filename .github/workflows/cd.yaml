@@ -74,9 +74,6 @@ jobs:
           RACKSPACE_CLUSTER_ID: ${{ vars.RACKSPACE_CLUSTER_ID }}
           RACKSPACE_REFRESH_TOKEN: ${{ secrets.RACKSPACE_REFRESH_TOKEN }}
         run: |
-          echo "--> Installing jq..."
-          sudo apt-get update -qq && sudo apt-get install -yqq jq > /dev/null
-
           echo "--> Generating kubeconfig from Rackspace Spot API..."
           JSON_PAYLOAD=$(printf '{"organization_name": "%s", "cloudspace_name": "%s", "refresh_token": "%s"}' \
             "$RACKSPACE_ORG_NAME" "$RACKSPACE_CLUSTER_ID" "$RACKSPACE_REFRESH_TOKEN")
