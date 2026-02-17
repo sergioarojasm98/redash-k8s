@@ -137,6 +137,21 @@ jobs:
       - name: "Apply: Redis"
         run: kubectl apply -f 10-redis.yaml
 
+      - name: "Pre-deploy: Scale down Redash to clear stuck state"
+        run: |
+          echo "--> Scaling down Redash deployments for clean redeploy..."
+          for deployment in redash-web redash-worker redash-scheduler; do
+            if kubectl get deployment $deployment -n ${{ env.KUBE_NAMESPACE }} &>/dev/null; then
+              kubectl scale deployment $deployment -n ${{ env.KUBE_NAMESPACE }} --replicas=0
+            fi
+          done
+          echo "--> Waiting for Redash pods to terminate..."
+          kubectl wait --for=delete pod -l app=redash -n ${{ env.KUBE_NAMESPACE }} --timeout=120s 2>/dev/null || true
+          echo "Scale-down complete, quota freed"
+
+      - name: "Apply: Redash core (web, worker, scheduler)"
+        run: kubectl apply -f 30-redash-core.yaml
+
       - name: "Apply: Database migration"
         if: ${{ inputs.run_migration }}
         run: |
@@ -155,9 +170,6 @@ jobs:
             kubectl logs job/redash-migrate -n ${{ env.KUBE_NAMESPACE }} --tail=50 || true
             exit 1
           fi
-
-      - name: "Apply: Redash core (web, worker, scheduler)"
-        run: kubectl apply -f 30-redash-core.yaml
 
       - name: "Apply: Cloudflare Tunnel"
         run: kubectl apply -f 40-cloudflared.yaml
