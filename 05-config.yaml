@@ -40,4 +40,4 @@ data:
   REDASH_DATABASE_MAX_OVERFLOW: "2"
 
   # Public URL (used for email links, OAuth callbacks)
-  REDASH_HOST: "https://redash.redsign98.net"
+  REDASH_HOST: "https://redash.sr98.net"

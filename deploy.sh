@@ -189,7 +189,7 @@ show_info() {
     print_success "Deployment completed successfully!"
     echo ""
     print_status " Access your applications via Cloudflare Tunnel:"
-    echo "    🎯 Redash: https://redash.redsign98.net"
+    echo "    🎯 Redash: https://redash.sr98.net"
     echo ""
     print_status "Useful commands for monitoring:"
     echo "  # Check pod status:"

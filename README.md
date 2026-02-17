@@ -101,21 +101,64 @@ TUNNEL_TOKEN=eyJhIjoiNj...
 
 ### 3. Access
 
-- **Redash**: https://redash.redsign98.net
+- **Redash**: https://redash.sr98.net
+
+## CD - GitHub Actions
+
+The project includes a CD workflow (`.github/workflows/cd.yaml`) that deploys to Kubernetes via `workflow_dispatch` (manual trigger).
+
+### Setup
+
+Configure the following in **Settings > Secrets and variables > Actions**:
+
+#### Secrets (sensitive values, masked in logs)
+
+| Secret | Description |
+|--------|-------------|
+| `RACKSPACE_REFRESH_TOKEN` | Rackspace Spot API refresh token |
+| `REDASH_COOKIE_SECRET` | Session cookie encryption key (`openssl rand -base64 32`) |
+| `REDASH_SECRET_KEY` | Application secret key (`openssl rand -base64 32`) |
+| `REDASH_DATABASE_URL` | PostgreSQL connection string (Supabase) |
+| `REDASH_MAIL_PASSWORD` | SMTP password (Resend API key) |
+| `TUNNEL_TOKEN` | Cloudflare Tunnel authentication token |
+
+#### Variables (non-sensitive, visible in logs)
+
+| Variable | Required | Default |
+|----------|----------|---------|
+| `RACKSPACE_ORG_NAME` | Yes | — |
+| `RACKSPACE_CLUSTER_ID` | Yes | — |
+| `REDASH_MAIL_DEFAULT_SENDER` | Yes | — |
+| `REDASH_MAIL_SERVER` | No | `smtp.resend.com` |
+| `REDASH_MAIL_PORT` | No | `587` |
+| `REDASH_MAIL_USE_SSL` | No | `false` |
+| `REDASH_MAIL_USE_TLS` | No | `true` |
+| `REDASH_MAIL_USERNAME` | No | `resend` |
+
+### Usage
+
+1. Go to **Actions** tab in GitHub
+2. Select **CD - Deploy to Kubernetes**
+3. Click **Run workflow**
+4. Optionally enable **Run database migration** (for first deploy or Redash upgrades)
+
+The workflow generates a kubeconfig dynamically via the Rackspace Spot API, processes the secrets template with `envsubst`, and applies all manifests in order.
 
 ## File Structure
 
 ```
 .
+├── .github/workflows/
+│   └── cd.yaml            # CD workflow (GitHub Actions)
 ├── 00-namespace.yaml      # Creates 'redash' namespace
-├── 02-secrets.yaml        # Secrets (populated from .env)
+├── 02-secrets.yaml        # Secrets template (populated from .env or GitHub Secrets)
 ├── 05-config.yaml         # Redash configuration
 ├── 10-redis.yaml          # Redis cache/broker
 ├── 20-job-migrate.yaml    # Database migration job
 ├── 30-redash-core.yaml    # Web, Worker, Scheduler deployments
 ├── 40-cloudflared.yaml    # Cloudflare Tunnel
 ├── 50-guardrails.yaml     # PDBs, ResourceQuota, NetworkPolicy
-├── deploy.sh              # Deployment automation
+├── deploy.sh              # Local deployment automation
 └── README.md
 ```
 
