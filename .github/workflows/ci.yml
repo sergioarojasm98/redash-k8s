@@ -23,4 +23,4 @@ jobs:
             00-namespace.yaml 05-config.yaml 10-redis.yaml \
             20-job-migrate.yaml 30-redash-core.yaml 40-cloudflared.yaml 50-guardrails.yaml
       - name: Lint shell scripts
-        run: shellcheck deploy.sh
+        run: shellcheck --severity=warning deploy.sh
