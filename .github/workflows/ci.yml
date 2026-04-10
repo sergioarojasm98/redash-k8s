@@ -1,0 +1,26 @@
+name: CI - Lint and Validate
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          pip install yamllint
+          sudo apt-get install -y shellcheck
+      - name: Lint YAML manifests
+        run: |
+          yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}}}' \
+            00-namespace.yaml 05-config.yaml 10-redis.yaml \
+            20-job-migrate.yaml 30-redash-core.yaml 40-cloudflared.yaml 50-guardrails.yaml
+      - name: Lint shell scripts
+        run: shellcheck deploy.sh
