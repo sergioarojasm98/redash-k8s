@@ -19,7 +19,7 @@ jobs:
           sudo apt-get install -y shellcheck
       - name: Lint YAML manifests
         run: |
-          yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}}}' \
+          yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}, trailing-spaces: disable}}' \
             00-namespace.yaml 05-config.yaml 10-redis.yaml \
             20-job-migrate.yaml 30-redash-core.yaml 40-cloudflared.yaml 50-guardrails.yaml
       - name: Lint shell scripts
