@@ -4,42 +4,19 @@ Deploy [Redash](https://redash.io/) on a cost-effective Kubernetes cluster using
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Cloudflare Edge                          │
-│                    (DDoS protection, WAF)                       │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ Tunnel
-┌──────────────────────────▼──────────────────────────────────────┐
-│                    Kubernetes Cluster                           │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                   redash namespace                       │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │   │
-│  │  │ redash-web  │  │redash-worker│  │ redash-scheduler│  │   │
-│  │  │  (Gunicorn) │  │  (Celery)   │  │  (Celery Beat)  │  │   │
-│  │  └──────┬──────┘  └──────┬──────┘  └────────┬────────┘  │   │
-│  │         │                │                  │           │   │
-│  │         └────────────────┼──────────────────┘           │   │
-│  │                          │                              │   │
-│  │                   ┌──────▼──────┐                       │   │
-│  │                   │ redash-redis│                       │   │
-│  │                   │   (cache)   │                       │   │
-│  │                   └─────────────┘                       │   │
-│  │                                                         │   │
-│  │  ┌───────────────────┐                                  │   │
-│  │  │ cloudflared-tunnel│ ←── External traffic             │   │
-│  │  │    (2 replicas)   │                                  │   │
-│  │  └───────────────────┘                                  │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                                                 │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │  Supabase Postgres  │
-                │  (external managed) │
-                └─────────────────────┘
+```mermaid
+graph TB
+    CF["Cloudflare Edge<br/>(DDoS, WAF)"] -->|Tunnel| CT["cloudflared<br/>(2 replicas)"]
+
+    subgraph K8s["Kubernetes Cluster — redash namespace"]
+        CT --> Web["redash-web<br/>(Gunicorn)"]
+        Web --> Redis["redash-redis<br/>(cache)"]
+        Worker["redash-worker<br/>(Celery)"] --> Redis
+        Scheduler["redash-scheduler<br/>(Celery Beat)"] --> Redis
+    end
+
+    Web --> DB["Supabase Postgres<br/>(external managed)"]
+    Worker --> DB
 ```
 
 ## Components
