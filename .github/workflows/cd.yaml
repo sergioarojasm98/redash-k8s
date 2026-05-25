@@ -49,7 +49,7 @@ jobs:
       # Setup
       # =====================================================================
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Pre-deployment summary
         run: |
@@ -61,7 +61,7 @@ jobs:
           echo "Triggered by: ${{ github.actor }}"
 
       - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
+        uses: azure/setup-kubectl@v5
         with:
           version: 'v1.29.0'
 
