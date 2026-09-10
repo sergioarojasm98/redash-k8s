@@ -1,0 +1,109 @@
+# =============================================================================
+# SUPABASE KEEP-ALIVE (layer 1 — in-cluster, primary)
+# =============================================================================
+# Supabase pauses free-tier projects after 7 days without user database
+# activity, and a project paused for 90 days can no longer be restored.
+#
+# Redash running does NOT generate that activity while nobody uses the UI:
+#   - redash-web only serves the k8s probes on GET /ping (query_count=0, no
+#     transaction opened against Postgres).
+#   - redash-worker / redash-scheduler poll Redis, not Postgres.
+#   - An idle-but-open pooler connection does not count as activity either.
+#
+# This CronJob writes to keepalive.heartbeat twice a day. The schema, the table
+# and the least-privilege `keepalive_bot` role are created once by hand — see
+# docs/keepalive-bootstrap.sql.
+#
+# A second, cluster-independent layer lives in
+# .github/workflows/keepalive.yml (the node is a preemptible Spot instance and
+# can disappear), and HC_PING_URL wires an optional dead-man's switch so a
+# silent failure of both layers is noticed before Supabase pauses the project.
+# =============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: supabase-keepalive
+  namespace: redash
+  labels:
+    app: redash
+    comp: keepalive
+spec:
+  schedule: "23 */12 * * *"      # 00:23 and 12:23
+  timeZone: "America/Bogota"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600  # still run if the node was down at the exact time
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: redash
+            comp: keepalive
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70          # postgres user in postgres:17-alpine
+            runAsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: keepalive
+              image: postgres:17-alpine
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              # ResourceQuota redash-quota sits at 3600m/4 limits.cpu, so the
+              # namespace has only 400m of headroom. Raising these will make the
+              # job Pending instead of running.
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              env:
+                - name: PGCONNECT_TIMEOUT
+                  value: "15"
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: redash-keepalive-secrets
+                      key: KEEPALIVE_DATABASE_URL
+                - name: HC_PING_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: redash-keepalive-secrets
+                      key: HC_PING_URL
+                      optional: true
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
+                    insert into keepalive.heartbeat (id) values (1) on conflict do nothing;
+                    update keepalive.heartbeat
+                       set last_ping = now(), ping_count = ping_count + 1
+                     where id = 1;
+                    select 'ok last_ping=' || last_ping || ' count=' || ping_count
+                      from keepalive.heartbeat where id = 1;
+                  "
+                  if [ -n "${HC_PING_URL:-}" ]; then
+                    wget -q -O- --timeout=10 "$HC_PING_URL" >/dev/null \
+                      || echo "warn: healthcheck ping failed"
+                  fi
