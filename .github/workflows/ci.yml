@@ -21,6 +21,7 @@ jobs:
         run: |
           yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}, trailing-spaces: disable}}' \
             00-namespace.yaml 05-config.yaml 10-redis.yaml \
-            20-job-migrate.yaml 30-redash-core.yaml 40-cloudflared.yaml 50-guardrails.yaml
+            20-job-migrate.yaml 30-redash-core.yaml 40-cloudflared.yaml 50-guardrails.yaml \
+            60-keepalive.yaml
       - name: Lint shell scripts
         run: shellcheck --severity=warning deploy.sh

@@ -69,6 +69,7 @@ validate_env_vars() {
         "REDASH_MAIL_PASSWORD"
         "REDASH_MAIL_DEFAULT_SENDER"
         "TUNNEL_TOKEN"
+        "KEEPALIVE_DATABASE_URL"
     )
     
     local missing_vars=()
@@ -118,6 +119,7 @@ apply_manifests() {
         "30-redash-core.yaml"
         "40-cloudflared.yaml"
         "50-guardrails.yaml"
+        "60-keepalive.yaml"
     )
     
     for file in "${files[@]}"; do
@@ -230,6 +232,10 @@ main() {
     check_kubectl
     validate_env_vars
     
+    # HC_PING_URL is optional (dead-man's switch); export it even when unset so
+    # envsubst renders an empty value instead of leaving the ${...} placeholder.
+    export HC_PING_URL="${HC_PING_URL:-}"
+
     # Process files with environment variable substitution
     substitute_vars "02-secrets.yaml"
     

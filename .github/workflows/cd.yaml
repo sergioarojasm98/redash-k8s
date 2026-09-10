@@ -11,6 +11,13 @@
 #   - REDASH_DATABASE_URL      : PostgreSQL connection string (Supabase)
 #   - REDASH_MAIL_PASSWORD     : SMTP password (Resend API key)
 #   - TUNNEL_TOKEN             : Cloudflare tunnel authentication token
+#   - KEEPALIVE_DATABASE_URL   : Supabase conn string for the keepalive_bot role
+#                                (see docs/keepalive-bootstrap.sql)
+#
+# Optional GitHub Secrets:
+#   - HC_PING_URL              : dead-man's switch ping URL for the keep-alive
+#                                CronJob (healthchecks.io / Uptime Kuma push).
+#                                Leave unset to disable the ping.
 #
 # Required GitHub Variables:
 #   - RACKSPACE_ORG_NAME       : Rackspace organization name
@@ -123,7 +130,15 @@ jobs:
           REDASH_MAIL_PASSWORD: ${{ secrets.REDASH_MAIL_PASSWORD }}
           REDASH_MAIL_DEFAULT_SENDER: ${{ vars.REDASH_MAIL_DEFAULT_SENDER }}
           TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+          KEEPALIVE_DATABASE_URL: ${{ secrets.KEEPALIVE_DATABASE_URL }}
+          HC_PING_URL: ${{ secrets.HC_PING_URL }}
         run: |
+          if [ -z "${KEEPALIVE_DATABASE_URL:-}" ]; then
+            echo "::warning::KEEPALIVE_DATABASE_URL is empty — the supabase-keepalive CronJob will fail and Supabase may pause the project. See docs/keepalive-bootstrap.sql."
+          fi
+          if [ -z "${HC_PING_URL:-}" ]; then
+            echo "::notice::HC_PING_URL is empty — the keep-alive dead-man's switch is disabled."
+          fi
           echo "--> Processing secrets template with envsubst..."
           envsubst < 02-secrets.yaml | kubectl apply -f -
           echo "Secrets applied successfully"
@@ -173,6 +188,9 @@ jobs:
 
       - name: "Apply: Guardrails (PDB, Quota, NetworkPolicy)"
         run: kubectl apply -f 50-guardrails.yaml
+
+      - name: "Apply: Supabase keep-alive CronJob"
+        run: kubectl apply -f 60-keepalive.yaml
 
       # =====================================================================
       # Wait for Rollout
