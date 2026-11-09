@@ -1,0 +1,63 @@
+# =============================================================================
+# JOB: redash-create-db (DATABASE INITIALIZATION)
+# =============================================================================
+# Creates all Redash tables and stamps the Alembic version.
+# Safe to run on an existing DB — will only create missing tables.
+#
+# WHEN TO USE:
+# - First deployment: Creates all tables in PostgreSQL
+# - After Redash version upgrade: delete job, re-apply, then run db upgrade
+#
+# IMPORTANT: Job stays in "Completed" state after running (this is normal).
+# To re-run: kubectl delete job redash-create-db -n redash
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redash-create-db
+  namespace: redash
+  labels:
+    app: redash
+    comp: migrate
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: redash/redash:25.8.0
+          command: ["/app/manage.py"]
+          args: ["database", "create_tables"]
+          envFrom:
+            - configMapRef:
+                name: redash-config
+            - secretRef:
+                name: redash-core-secrets
+          env:
+            - name: REDASH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redash-database-secrets
+                  key: REDASH_DATABASE_URL
+            - name: REDASH_REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: redash-config
+                  key: REDASH_REDIS_URL
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "320Mi"
+            limits:
+              cpu: "600m"
+              memory: "640Mi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,53 @@
+# =============================================================================
+# Supabase keep-alive (layer 2 — outside the cluster, backup)
+# =============================================================================
+# The in-cluster CronJob (60-keepalive.yaml) is the primary keep-alive, but the
+# cluster is a single preemptible Rackspace Spot node. If it gets reclaimed and
+# nobody notices for 7 days, Supabase pauses the project again — and a project
+# left paused for 90 days can no longer be restored. This workflow runs the same
+# heartbeat from GitHub-hosted infrastructure, so it survives losing the node.
+#
+# Required repo secret:
+#   - KEEPALIVE_DATABASE_URL : connection string for the keepalive_bot role,
+#                              see docs/keepalive-bootstrap.sql
+#
+# This repository is private, so the 60-day auto-disable of scheduled workflows
+# (public repos only) does not apply — no keepalive-workflow trick needed.
+# =============================================================================
+name: supabase-keepalive
+
+on:
+  schedule:
+    - cron: "37 7 */3 * *"   # every 3 days, UTC
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container: postgres:17-alpine
+    steps:
+      - name: Ping Supabase
+        env:
+          DATABASE_URL: ${{ secrets.KEEPALIVE_DATABASE_URL }}
+          PGCONNECT_TIMEOUT: "15"
+        # postgres:17-alpine has no bash; pin sh explicitly instead of relying
+        # on the runner's bash->sh fallback.
+        shell: sh
+        run: |
+          set -eu
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::KEEPALIVE_DATABASE_URL secret is not set"
+            exit 1
+          fi
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
+            insert into keepalive.heartbeat (id) values (1) on conflict do nothing;
+            update keepalive.heartbeat
+               set last_ping = now(), ping_count = ping_count + 1
+             where id = 1;
+            select last_ping, ping_count from keepalive.heartbeat where id = 1;
+          "

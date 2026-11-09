@@ -1,0 +1,141 @@
+# =============================================================================
+# CLOUDFLARED TUNNEL - Zero-Trust External Access
+# =============================================================================
+# Cloudflare Tunnel provides secure external access without exposing ports.
+# Traffic flow: Internet → Cloudflare Edge → Tunnel → ClusterIP Service
+#
+# Benefits:
+# - No LoadBalancer or NodePort needed (cost savings on Spot clusters)
+# - DDoS protection and WAF included
+# - Zero-trust security model
+# - Works behind NAT/firewalls
+#
+# Configuration is managed in Cloudflare dashboard (tunnel routes).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Service: cloudflared-tunnel
+# Exposes metrics endpoint for monitoring (optional)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-tunnel
+  namespace: redash
+  labels:
+    app: cloudflared-tunnel
+  annotations:
+    # Prometheus scrape configuration (if using Prometheus)
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "2000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: cloudflared-tunnel
+  ports:
+    - name: metrics
+      port: 2000
+      targetPort: 2000
+      protocol: TCP
+
+---
+# -----------------------------------------------------------------------------
+# Deployment: cloudflared-tunnel
+# Two replicas for high availability during node maintenance
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared-tunnel
+  namespace: redash
+  labels:
+    app: cloudflared-tunnel
+spec:
+  revisionHistoryLimit: 2
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared-tunnel
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: cloudflared-tunnel
+    spec:
+      # Spread pods across nodes for availability
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: cloudflared-tunnel
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2026.10.3
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: redash-cloudflared-token
+                  key: token
+          command: ["cloudflared"]
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --loglevel
+            - info
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          ports:
+            - name: metrics
+              containerPort: 2000
+              protocol: TCP
+          # Startup probe - allows up to 60s for initial connection
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

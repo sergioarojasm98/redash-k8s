@@ -1,0 +1,123 @@
+# =============================================================================
+# REDIS - In-Memory Cache and Message Broker
+# =============================================================================
+# Redis serves two purposes in Redash:
+# 1. Celery broker: Queue for async query execution jobs
+# 2. Cache: Stores query results, session data, rate limiting
+#
+# Configuration: Ephemeral (no persistence) - data lost on pod restart
+# This is acceptable because:
+# - Query results are also stored in PostgreSQL
+# - Cache rebuilds automatically
+# - Scheduled queries re-execute on their schedule
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ConfigMap: redis.conf
+# Optimized for cache-only usage with memory limits
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redash-redis-conf
+  namespace: redash
+  labels:
+    app: redash-redis
+data:
+  redis.conf: |
+    # Memory limit - evict old keys when full (LRU policy)
+    maxmemory 768mb
+    maxmemory-policy allkeys-lru
+    
+    # Disable persistence - pure cache mode
+    # Faster startup, no disk I/O, smaller footprint
+    save ""
+    appendonly no
+    dir /data
+    
+    # Connection settings
+    tcp-keepalive 60
+    timeout 300
+    maxclients 1000
+    
+    # Logging
+    loglevel notice
+
+---
+# -----------------------------------------------------------------------------
+# Service: redash-redis
+# Internal ClusterIP for Redash components to connect
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: redash-redis
+  namespace: redash
+  labels:
+    app: redash-redis
+spec:
+  type: ClusterIP
+  selector:
+    app: redash-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+
+---
+# -----------------------------------------------------------------------------
+# Deployment: redash-redis
+# Single replica Redis with security hardening
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redash-redis
+  namespace: redash
+  labels:
+    app: redash-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redash-redis
+  template:
+    metadata:
+      labels:
+        app: redash-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["redis-server", "/etc/redis/redis.conf"]
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-conf
+              mountPath: /etc/redis
+              readOnly: true
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "120m"
+              memory: "384Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+      volumes:
+        - name: redis-conf
+          configMap:
+            name: redash-redis-conf
+            items:
+              - key: redis.conf
+                path: redis.conf
+        # Ephemeral storage - data lost on pod restart
+        - name: redis-data
+          emptyDir: {}

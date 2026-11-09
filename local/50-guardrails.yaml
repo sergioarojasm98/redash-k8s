@@ -1,0 +1,45 @@
+# =============================================================================
+# GUARDRAILS - Resource Limits and Network Policies
+# =============================================================================
+# Protective measures for the Redash namespace on a local cluster (OrbStack).
+# Lighter than the cloud version — no PDBs needed locally.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ResourceQuota: redash-quota
+# Prevents runaway resource consumption in the namespace
+# Tuned for OrbStack local Kubernetes
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: redash-quota
+  namespace: redash
+spec:
+  hard:
+    requests.cpu: "3"
+    limits.cpu: "6"
+    requests.memory: "5Gi"
+    limits.memory: "8Gi"
+    persistentvolumeclaims: "5"
+    pods: "20"
+
+---
+# -----------------------------------------------------------------------------
+# NetworkPolicy: redash-network-policy
+# Permissive for local development — allows all traffic
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redash-network-policy
+  namespace: redash
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - {}
+  egress:
+    - {}

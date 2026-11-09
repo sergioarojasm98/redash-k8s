@@ -1,0 +1,115 @@
+# =============================================================================
+# POSTGRESQL - Local Database for Redash
+# =============================================================================
+# Local PostgreSQL instance running inside the cluster.
+# Uses a PersistentVolumeClaim so data survives pod restarts.
+#
+# Credentials are injected from the redash-database-secrets Secret.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PersistentVolumeClaim: postgres-data
+# Stores PostgreSQL data files (WAL, tables, indexes)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: redash
+  labels:
+    app: redash-postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# -----------------------------------------------------------------------------
+# Service: redash-postgres
+# Internal ClusterIP for Redash components to connect
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: redash-postgres
+  namespace: redash
+  labels:
+    app: redash-postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: redash-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+
+---
+# -----------------------------------------------------------------------------
+# Deployment: redash-postgres
+# Single replica PostgreSQL 16 Alpine with persistent storage
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redash-postgres
+  namespace: redash
+  labels:
+    app: redash-postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redash-postgres
+  template:
+    metadata:
+      labels:
+        app: redash-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "redash"
+            - name: POSTGRES_USER
+              value: "redash"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redash-database-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "redash", "-d", "redash"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "redash", "-d", "redash"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data

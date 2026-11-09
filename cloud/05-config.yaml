@@ -1,0 +1,43 @@
+# =============================================================================
+# CONFIGMAP: redash-config
+# =============================================================================
+# Non-sensitive Redash configuration.
+# Tuned for single-user usage with multiple concurrent browser tabs.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redash-config
+  namespace: redash
+  labels:
+    app: redash
+data:
+  # Python output buffering (0 = unbuffered for better logging)
+  PYTHONUNBUFFERED: "0"
+  REDASH_LOG_LEVEL: "INFO"
+
+  # Redis connection (in-cluster cache and Celery broker)
+  REDASH_REDIS_URL: "redis://redash-redis.redash.svc.cluster.local:6379/0"
+
+  # ---------------------------------------------------------------------
+  # Concurrency settings - Balance between Supabase limits and usability
+  # ---------------------------------------------------------------------
+  # WEB_WORKERS: Gunicorn workers to handle concurrent HTTP requests
+  #   - Each browser tab = 1+ concurrent requests
+  #   - 2 workers allows serving multiple tabs without blocking
+  # 
+  # DATABASE_POOL_SIZE: Connections per worker to PostgreSQL
+  #   - Supabase free tier has ~20-60 connection limit
+  #   - Total connections = workers × pool_size × pods
+  #   - Current: 2 workers × 3 pool × 1 pod = 6 connections for web
+  #
+  # MAX_OVERFLOW: Extra connections during traffic spikes
+  #   - Temporary connections beyond pool_size
+  #   - Helps prevent "connection pool exhausted" errors
+  # ---------------------------------------------------------------------
+  REDASH_WEB_WORKERS: "2"
+  REDASH_DATABASE_POOL_SIZE: "3"
+  REDASH_DATABASE_MAX_OVERFLOW: "2"
+
+  # Public URL (used for email links, OAuth callbacks)
+  REDASH_HOST: "https://redash.example.com"

@@ -1,0 +1,300 @@
+# =============================================================================
+# CD Workflow: Deploy Redash to Rackspace Spot Kubernetes
+# =============================================================================
+# Deploys Redash and all its components using plain K8s manifests.
+# Exposes via Cloudflare Tunnel — no public IPs.
+#
+# Required GitHub Secrets:
+#   - RACKSPACE_REFRESH_TOKEN  : Rackspace Spot API authentication
+#   - REDASH_COOKIE_SECRET     : Session cookie encryption key
+#   - REDASH_SECRET_KEY        : Application secret for tokens
+#   - REDASH_DATABASE_URL      : PostgreSQL connection string (Supabase)
+#   - REDASH_MAIL_PASSWORD     : SMTP password (Resend API key)
+#   - TUNNEL_TOKEN             : Cloudflare tunnel authentication token
+#   - KEEPALIVE_DATABASE_URL   : Supabase conn string for the keepalive_bot role
+#                                (see docs/keepalive-bootstrap.sql)
+#
+# Optional GitHub Secrets:
+#   - HC_PING_URL              : dead-man's switch ping URL for the keep-alive
+#                                CronJob (healthchecks.io / Uptime Kuma push).
+#                                Leave unset to disable the ping.
+#
+# Required GitHub Variables:
+#   - RACKSPACE_ORG_NAME       : Rackspace organization name
+#   - RACKSPACE_CLUSTER_ID     : Rackspace cloudspace/cluster ID
+#   - REDASH_MAIL_DEFAULT_SENDER : Email sender address
+#
+# Optional GitHub Variables (with defaults):
+#   - REDASH_MAIL_SERVER       : SMTP server (default: smtp.resend.com)
+#   - REDASH_MAIL_PORT         : SMTP port (default: 587)
+#   - REDASH_MAIL_USE_SSL      : Use SSL (default: false)
+#   - REDASH_MAIL_USE_TLS      : Use TLS (default: true)
+#   - REDASH_MAIL_USERNAME     : SMTP username (default: resend)
+# =============================================================================
+
+name: CD - Deploy to Kubernetes
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migration:
+        description: 'Run database migration (first deploy or Redash upgrade)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  KUBE_NAMESPACE: redash
+
+defaults:
+  run:
+    working-directory: cloud
+
+jobs:
+  deploy:
+    name: Deploy Redash to Kubernetes
+    runs-on: ubuntu-latest
+
+    steps:
+      # =====================================================================
+      # Setup
+      # =====================================================================
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Pre-deployment summary
+        run: |
+          echo "DEPLOYMENT SUMMARY"
+          echo "===================="
+          echo "Namespace: ${{ env.KUBE_NAMESPACE }}"
+          echo "Run migration: ${{ inputs.run_migration }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Triggered by: ${{ github.actor }}"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v5
+        with:
+          version: 'v1.29.0'
+
+      # =====================================================================
+      # Configure Kubernetes Access via Rackspace Spot API
+      # =====================================================================
+      - name: Generate kubeconfig from Rackspace Spot API
+        env:
+          RACKSPACE_ORG_NAME: ${{ vars.RACKSPACE_ORG_NAME }}
+          RACKSPACE_CLUSTER_ID: ${{ vars.RACKSPACE_CLUSTER_ID }}
+          RACKSPACE_REFRESH_TOKEN: ${{ secrets.RACKSPACE_REFRESH_TOKEN }}
+        run: |
+          echo "--> Generating kubeconfig from Rackspace Spot API..."
+          JSON_PAYLOAD=$(printf '{"organization_name": "%s", "cloudspace_name": "%s", "refresh_token": "%s"}' \
+            "$RACKSPACE_ORG_NAME" "$RACKSPACE_CLUSTER_ID" "$RACKSPACE_REFRESH_TOKEN")
+
+          API_RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            'https://spot.rackspace.com/apis/auth.ngpc.rxt.io/v1/generate-kubeconfig')
+
+          SANITIZED_RESPONSE=$(echo "$API_RESPONSE" | tr -d '\r')
+
+          if ! echo "$SANITIZED_RESPONSE" | jq -e '.data.kubeconfig' > /dev/null 2>&1; then
+            echo "ERROR: Failed to retrieve a valid kubeconfig."
+            echo "API Response: $SANITIZED_RESPONSE"
+            exit 1
+          fi
+
+          mkdir -p ~/.kube
+          echo "$SANITIZED_RESPONSE" | jq -r '.data.kubeconfig' > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+          echo "Kubeconfig generated successfully"
+
+      - name: Validate cluster connection
+        run: |
+          echo "--> Validating connection to Kubernetes cluster..."
+          kubectl cluster-info
+          kubectl get nodes --no-headers | head -3
+          echo "Successfully connected to cluster"
+
+      # =====================================================================
+      # Apply Manifests (in order)
+      # =====================================================================
+      - name: "Apply: Namespace"
+        run: kubectl apply -f 00-namespace.yaml
+
+      - name: "Apply: Secrets (via envsubst)"
+        env:
+          REDASH_COOKIE_SECRET: ${{ secrets.REDASH_COOKIE_SECRET }}
+          REDASH_SECRET_KEY: ${{ secrets.REDASH_SECRET_KEY }}
+          REDASH_DATABASE_URL: ${{ secrets.REDASH_DATABASE_URL }}
+          REDASH_MAIL_SERVER: ${{ vars.REDASH_MAIL_SERVER || 'smtp.resend.com' }}
+          REDASH_MAIL_PORT: ${{ vars.REDASH_MAIL_PORT || '587' }}
+          REDASH_MAIL_USE_SSL: ${{ vars.REDASH_MAIL_USE_SSL || 'false' }}
+          REDASH_MAIL_USE_TLS: ${{ vars.REDASH_MAIL_USE_TLS || 'true' }}
+          REDASH_MAIL_USERNAME: ${{ vars.REDASH_MAIL_USERNAME || 'resend' }}
+          REDASH_MAIL_PASSWORD: ${{ secrets.REDASH_MAIL_PASSWORD }}
+          REDASH_MAIL_DEFAULT_SENDER: ${{ vars.REDASH_MAIL_DEFAULT_SENDER }}
+          TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+          KEEPALIVE_DATABASE_URL: ${{ secrets.KEEPALIVE_DATABASE_URL }}
+          HC_PING_URL: ${{ secrets.HC_PING_URL }}
+        run: |
+          if [ -z "${KEEPALIVE_DATABASE_URL:-}" ]; then
+            echo "::warning::KEEPALIVE_DATABASE_URL is empty — the supabase-keepalive CronJob will fail and Supabase may pause the project. See docs/keepalive-bootstrap.sql."
+          fi
+          if [ -z "${HC_PING_URL:-}" ]; then
+            echo "::notice::HC_PING_URL is empty — the keep-alive dead-man's switch is disabled."
+          fi
+          echo "--> Processing secrets template with envsubst..."
+          envsubst < 02-secrets.yaml | kubectl apply -f -
+          echo "Secrets applied successfully"
+
+      - name: "Apply: ConfigMap"
+        run: kubectl apply -f 05-config.yaml
+
+      - name: "Apply: Redis"
+        run: kubectl apply -f 10-redis.yaml
+
+      - name: "Pre-deploy: Scale down Redash to clear stuck state"
+        run: |
+          echo "--> Scaling down Redash deployments for clean redeploy..."
+          for deployment in redash-web redash-worker redash-scheduler; do
+            if kubectl get deployment $deployment -n ${{ env.KUBE_NAMESPACE }} &>/dev/null; then
+              kubectl scale deployment $deployment -n ${{ env.KUBE_NAMESPACE }} --replicas=0
+            fi
+          done
+          echo "--> Waiting for Redash pods to terminate..."
+          kubectl wait --for=delete pod -l app=redash -n ${{ env.KUBE_NAMESPACE }} --timeout=120s 2>/dev/null || true
+          echo "Scale-down complete, quota freed"
+
+      - name: "Apply: Redash core (web, worker, scheduler)"
+        run: kubectl apply -f 30-redash-core.yaml
+
+      - name: "Apply: Database migration"
+        if: ${{ inputs.run_migration }}
+        run: |
+          echo "--> Cleaning up previous migration job (if exists)..."
+          kubectl delete job redash-migrate -n ${{ env.KUBE_NAMESPACE }} --ignore-not-found=true
+
+          echo "--> Applying migration job..."
+          kubectl apply -f 20-job-migrate.yaml
+
+          echo "--> Waiting for migration to complete (timeout: 5m)..."
+          if kubectl wait --for=condition=complete --timeout=300s job/redash-migrate -n ${{ env.KUBE_NAMESPACE }}; then
+            echo "Migration completed successfully"
+          else
+            echo "ERROR: Migration failed or timed out"
+            echo "=== Migration Logs ==="
+            kubectl logs job/redash-migrate -n ${{ env.KUBE_NAMESPACE }} --tail=50 || true
+            exit 1
+          fi
+
+      - name: "Apply: Cloudflare Tunnel"
+        run: kubectl apply -f 40-cloudflared.yaml
+
+      - name: "Apply: Guardrails (PDB, Quota, NetworkPolicy)"
+        run: kubectl apply -f 50-guardrails.yaml
+
+      - name: "Apply: Supabase keep-alive CronJob"
+        run: kubectl apply -f 60-keepalive.yaml
+
+      # =====================================================================
+      # Wait for Rollout
+      # =====================================================================
+      - name: Wait for deployments rollout
+        id: rollout_status
+        continue-on-error: true
+        run: |
+          DEPLOYMENTS=("redash-web" "redash-worker" "redash-scheduler" "cloudflared-tunnel")
+
+          for deployment in "${DEPLOYMENTS[@]}"; do
+            echo "--> Waiting for $deployment rollout..."
+            kubectl rollout status deployment/$deployment \
+              --namespace ${{ env.KUBE_NAMESPACE }} \
+              --timeout=300s
+          done
+
+          echo "All deployments are ready"
+
+      # =====================================================================
+      # Debug on Rollout Failure
+      # =====================================================================
+      - name: Debug deployment on failure
+        if: steps.rollout_status.outcome == 'failure'
+        run: |
+          echo "Deployment rollout failed. Collecting debug information..."
+
+          echo ""
+          echo "=== Deployments ==="
+          kubectl get deployments -n ${{ env.KUBE_NAMESPACE }} || true
+
+          echo ""
+          echo "=== Pods ==="
+          kubectl get pods -n ${{ env.KUBE_NAMESPACE }} -o wide || true
+
+          echo ""
+          echo "=== Redash Web - Describe ==="
+          kubectl describe pods -l comp=web -n ${{ env.KUBE_NAMESPACE }} || true
+
+          echo ""
+          echo "=== Redash Worker - Describe ==="
+          kubectl describe pods -l comp=worker -n ${{ env.KUBE_NAMESPACE }} || true
+
+          echo ""
+          echo "=== Redash Scheduler - Describe ==="
+          kubectl describe pods -l comp=scheduler -n ${{ env.KUBE_NAMESPACE }} || true
+
+          echo ""
+          echo "=== Cloudflared Tunnel - Describe ==="
+          kubectl describe pods -l app=cloudflared-tunnel -n ${{ env.KUBE_NAMESPACE }} || true
+
+          echo ""
+          echo "=== Pod Logs (last 50 lines) ==="
+          for comp in web worker scheduler; do
+            echo "--- redash-$comp ---"
+            kubectl logs -l comp=$comp -n ${{ env.KUBE_NAMESPACE }} --all-containers=true --tail=50 || true
+          done
+          echo "--- cloudflared-tunnel ---"
+          kubectl logs -l app=cloudflared-tunnel -n ${{ env.KUBE_NAMESPACE }} --all-containers=true --tail=50 || true
+
+          echo ""
+          echo "=== Namespace Events (last 30) ==="
+          kubectl get events -n ${{ env.KUBE_NAMESPACE }} --sort-by='.lastTimestamp' | tail -30 || true
+
+          exit 1
+
+      # =====================================================================
+      # Verification and Summary
+      # =====================================================================
+      - name: Verify deployment
+        run: |
+          echo "=== Deployment Status ==="
+          kubectl get deployments -n ${{ env.KUBE_NAMESPACE }}
+
+          echo ""
+          echo "=== Pod Status ==="
+          kubectl get pods -n ${{ env.KUBE_NAMESPACE }}
+
+          echo ""
+          echo "=== Services ==="
+          kubectl get services -n ${{ env.KUBE_NAMESPACE }}
+
+      - name: Generate deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Namespace** | \`${{ env.KUBE_NAMESPACE }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Migration** | \`${{ inputs.run_migration }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Components Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Image |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Redash (web/worker/scheduler) | \`redash/redash:25.8.0\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Redis | \`redis:7.2-alpine\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cloudflared | \`cloudflare/cloudflared:2026.10.3\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Access" >> $GITHUB_STEP_SUMMARY
+          echo "Redash: your REDASH_HOST" >> $GITHUB_STEP_SUMMARY

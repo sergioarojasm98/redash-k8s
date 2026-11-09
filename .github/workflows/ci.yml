@@ -1,0 +1,31 @@
+name: CI - Lint and Validate
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [cloud, local]
+    defaults:
+      run:
+        working-directory: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install tools
+        run: |
+          pip install yamllint
+          sudo apt-get install -y shellcheck
+      - name: Lint YAML manifests
+        run: |
+          yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}, trailing-spaces: disable}}' \
+            $(ls [0-9][0-9]-*.yaml | grep -v '^02-secrets.yaml$')
+      - name: Lint shell scripts
+        run: shellcheck --severity=warning deploy.sh

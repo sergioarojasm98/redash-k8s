@@ -1,0 +1,30 @@
+# =============================================================================
+# CONFIGMAP: redash-config
+# =============================================================================
+# Non-sensitive Redash configuration.
+# Tuned for local development / single-user usage.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redash-config
+  namespace: redash
+  labels:
+    app: redash
+data:
+  PYTHONUNBUFFERED: "0"
+  REDASH_LOG_LEVEL: "INFO"
+
+  # Redis connection (in-cluster cache and Celery broker)
+  REDASH_REDIS_URL: "redis://redash-redis.redash.svc.cluster.local:6379/0"
+
+  # Gunicorn workers
+  REDASH_WEB_WORKERS: "2"
+
+  # DB pool — local PostgreSQL has no connection limit concerns
+  REDASH_DATABASE_POOL_SIZE: "5"
+  REDASH_DATABASE_MAX_OVERFLOW: "3"
+
+  # Public URL — set by deploy.sh based on detected LAN IP
+  # Default to localhost; deploy.sh will patch this after apply
+  REDASH_HOST: "http://localhost:30500"
